@@ -4,7 +4,7 @@ FROM python:3.8-slim
 # Set environment variables to prevent interactive prompts during installation
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install necessary system dependencies (including ffmpeg for pydub and git for chord-detection)
+# Install necessary system dependencies (including ffmpeg and git)
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     git \
@@ -17,8 +17,11 @@ WORKDIR /app
 # Copy the requirements file into the container
 COPY requirements.txt /app/
 
-# Install Python dependencies from requirements.txt
+# Install the dependencies (installing chord-detection separately)
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Clone chord-detection manually from GitHub
+RUN git clone https://github.com/belovm96/chord-detection.git && cd chord-detection && pip install .
 
 # Copy the rest of the application code into the container
 COPY . /app/
