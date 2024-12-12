@@ -2,4 +2,5 @@ flask
 flask-cors
 spleeter
 pydub
+protobuf==3.20.3
 git+https://github.com/belovm96/chord-detection.git
