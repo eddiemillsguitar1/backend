@@ -1,6 +1,6 @@
-flask
+Flask
 flask-cors
 spleeter
-pydub
-protobuf==3.20.3
+ffmpeg
+Werkzeug
 
