@@ -1,56 +1,62 @@
-from flask import Flask, request, jsonify
+import os
+from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 from spleeter.separator import Separator
-import os
-import shutil
 import tempfile
+import shutil
 from werkzeug.utils import secure_filename
 
+# Set the environment variable to use Python implementation for protobuf (if not done already)
+os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'
+
 app = Flask(__name__)
-CORS(app)  # Enable CORS for frontend communication
+CORS(app)  # Enable CORS for all routes
 
-# Define a temporary directory for storing uploaded MP3 files and processed stems
-UPLOAD_FOLDER = tempfile.mkdtemp()
-OUTPUT_FOLDER = tempfile.mkdtemp()
-ALLOWED_EXTENSIONS = {'mp3'}
+# Basic route to ensure the app is working
+@app.route('/')
+def home():
+    return jsonify({"message": "Welcome to the MP3 Processing API!"})
 
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['OUTPUT_FOLDER'] = OUTPUT_FOLDER
-
-# Helper function to check allowed file extension
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-# Route to handle MP3 file upload and stem separation
-@app.route('/upload', methods=['POST'])
-def upload_file():
+# Endpoint to process uploaded MP3 file and return stems
+@app.route('/process_mp3', methods=['POST'])
+def process_mp3():
     if 'file' not in request.files:
-        return jsonify({'error': 'No file part'}), 400
+        return jsonify({"error": "No file part"}), 400
+    
     file = request.files['file']
+    
     if file.filename == '':
-        return jsonify({'error': 'No selected file'}), 400
-    if file and allowed_file(file.filename):
-        filename = secure_filename(file.filename)
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
+        return jsonify({"error": "No selected file"}), 400
+    
+    # Secure the file name and save it temporarily
+    filename = secure_filename(file.filename)
+    temp_dir = tempfile.mkdtemp()
+    file_path = os.path.join(temp_dir, filename)
+    file.save(file_path)
+    
+    try:
+        # Using Spleeter to separate the file into stems
+        separator = Separator('spleeter:2stems')  # You can change this to '4stems' or '5stems'
+        output_dir = os.path.join(temp_dir, 'output')
+        separator.separate_to_file(file_path, output_dir)
 
-        # Process the file to separate stems using Spleeter
-        separator = Separator('spleeter:2stems')  # Using 2stems (vocals, accompaniment)
-        output_dir = os.path.join(app.config['OUTPUT_FOLDER'], 'output')
-        separator.separate_to_file(filepath, output_dir)
+        # Find the separated stems
+        stems_dir = os.path.join(output_dir, filename.split('.')[0])
+        vocals_path = os.path.join(stems_dir, 'vocals.wav')
+        accompaniment_path = os.path.join(stems_dir, 'accompaniment.wav')
 
-        # Prepare the output folder (stems) for download
-        stem_files = []
-        for root, dirs, files in os.walk(output_dir):
-            for file in files:
-                stem_files.append(os.path.join(root, file))
+        # Send the stems back to the client
+        return jsonify({
+            "vocals": vocals_path,
+            "accompaniment": accompaniment_path
+        })
+    
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        # Clean up temporary files
+        shutil.rmtree(temp_dir)
 
-        # Return the paths of stems to the frontend
-        return jsonify({'stems': stem_files})
-
-    return jsonify({'error': 'Invalid file type'}), 400
-
-# Run the app
+# Start the Flask app
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
-
+    app.run(host='0.0.0.0', port=5000, debug=True)
