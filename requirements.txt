@@ -1,0 +1,5 @@
+flask
+flask-cors
+spleeter
+pydub
+git+https://github.com/belovm96/chord-detection.git
