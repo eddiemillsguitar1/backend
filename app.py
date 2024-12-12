@@ -1,55 +1,56 @@
-# Import required libraries
-import os
-from flask import Flask, request, send_file
+from flask import Flask, request, jsonify
 from flask_cors import CORS
 from spleeter.separator import Separator
-from pydub import AudioSegment
-import chord_detection
+import os
+import shutil
+import tempfile
+from werkzeug.utils import secure_filename
 
-# Initialize Flask app
 app = Flask(__name__)
-CORS(app)
+CORS(app)  # Enable CORS for frontend communication
 
-# Function to convert WAV to MP3
-def convert_to_mp3(input_path, output_path):
-    audio = AudioSegment.from_wav(input_path)
-    audio.export(output_path, format="mp3")
+# Define a temporary directory for storing uploaded MP3 files and processed stems
+UPLOAD_FOLDER = tempfile.mkdtemp()
+OUTPUT_FOLDER = tempfile.mkdtemp()
+ALLOWED_EXTENSIONS = {'mp3'}
 
-# Route for file upload and processing
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['OUTPUT_FOLDER'] = OUTPUT_FOLDER
+
+# Helper function to check allowed file extension
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+# Route to handle MP3 file upload and stem separation
 @app.route('/upload', methods=['POST'])
 def upload_file():
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part'}), 400
     file = request.files['file']
-    filename = file.filename
-    file.save(filename)
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
 
-    # Separate stems using Spleeter
-    separator = Separator('spleeter:5stems')
-    separator.separate_to_file(filename, '/content/')
+        # Process the file to separate stems using Spleeter
+        separator = Separator('spleeter:2stems')  # Using 2stems (vocals, accompaniment)
+        output_dir = os.path.join(app.config['OUTPUT_FOLDER'], 'output')
+        separator.separate_to_file(filepath, output_dir)
 
-    # Convert stems to mp3
-    stems_path = f'/content/{filename.split(".")[0]}'
-    convert_to_mp3(f"{stems_path}/vocals.wav", "vocals.mp3")
-    convert_to_mp3(f"{stems_path}/drums.wav", "drums.mp3")
-    convert_to_mp3(f"{stems_path}/bass.wav", "bass.mp3")
-    convert_to_mp3(f"{stems_path}/other.wav", "keyboard.mp3")
-    convert_to_mp3(f"{stems_path}/accompaniment.wav", "guitar.mp3")
+        # Prepare the output folder (stems) for download
+        stem_files = []
+        for root, dirs, files in os.walk(output_dir):
+            for file in files:
+                stem_files.append(os.path.join(root, file))
 
-    # Process MP3 for chords using the chord detection API
-    chords = chord_detection.predict(filename)
+        # Return the paths of stems to the frontend
+        return jsonify({'stems': stem_files})
 
-    # Placeholder for lyrics extraction
-    lyrics = ["Line 1 of lyrics", "Line 2 of lyrics", "Line 3 of lyrics"]  # Replace with actual lyrics extraction logic
-
-    # Combine lyrics and chords into a text file
-    with open("lyrics_and_chords.txt", "w") as f:
-        for line, chord in zip(lyrics, chords):
-            f.write(f"{chord} {line}\n")
-
-    # Create a zip file with all outputs
-    os.system(f"zip -r outputs.zip vocals.mp3 drums.mp3 bass.mp3 keyboard.mp3 guitar.mp3 lyrics_and_chords.txt")
-
-    return send_file("outputs.zip", as_attachment=True)
+    return jsonify({'error': 'Invalid file type'}), 400
 
 # Run the app
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=5000)
+
